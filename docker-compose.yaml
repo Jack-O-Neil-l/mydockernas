@@ -1,0 +1,265 @@
+---
+version: "2.1"
+networks:
+  myvlan:
+    external: true
+services:
+  transmission-openvpn:
+    image: haugene/transmission-openvpn
+    container_name: transmission
+    cap_add:
+      - NET_ADMIN
+    environment:
+      - TZ=America/Montreal
+      - OPENVPN_PROVIDER=${OPENVPN_PROVIDER}
+      - OPENVPN_USERNAME=${OPENVPN_USERNAME}
+      - OPENVPN_PASSWORD=${OPENVPN_PASSWORD}
+      - OPENVPN_CONFIG=ca_montreal,ca_ontario,ca_toronto
+      - OPENVPN_OPTS=--inactive 3600 --ping 10 --ping-exit 60
+      - LOCAL_NETWORK=192.168.1.0/24
+      - TRANSMISSION_DOWNLOAD_DIR=/completed
+      - TRANSMISSION_INCOMPLETE_DIR=/incomplete
+      - TRANSMISSION_WATCH_DIR=/watch
+      - TRANSMISSION_RPC_USERNAME=${TRANSMISSION_RPC_USERNAME}
+      - TRANSMISSION_RPC_PASSWORD=${TRANSMISSION_RPC_PASSWORD}
+      - TRANSMISSION_RPC_AUTHENTICATION_REQUIRED=true
+      - TRANSMISSION_PORT_FORWARDING_ENABLED=true
+      - TRANSMISSION_SPEED_LIMIT_UP=2000
+      - TRANSMISSION_SPEED_LIMIT_UP_ENABLED=true
+      - ENABLE_UFW=true
+      - UFW_ALLOW_GW_NET=true
+      - WEBPROXY_ENABLED=true
+      - WEBPROXY_PORT=8888    
+    volumes:
+      - ${DOCKER_FOLDER}/transmission/data:/data
+      - ${TORRENT_COMPLETED_FOLDER}:/completed
+      - ${TORRENT_INCOMPLETE_FOLDER}:/incomplete
+      - ${TORRENT_WATCH_FOLDER}:/watch
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+    ports:
+      - 9091
+    restart: always
+
+  plex:
+    image: lscr.io/linuxserver/plex
+    container_name: plex
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
+    environment:
+      - PUID=1000
+      - PGID=100
+      - VERSION=docker
+      - PLEX_CLAIM=${PLEX_CLAIM}
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+    volumes:
+      - ${DOCKER_FOLDER}/swag/config/etc/letsencrypt/live:/certs
+      - ${DOCKER_FOLDER}/plex/config:/config
+      - ${MOVIES_FOLDER}:/movies
+      - ${TV_SHOWS_FOLDER}:/tvshows
+    networks:
+      myvlan:
+        ipv4_address: 192.168.1.21
+    restart: always
+    
+  sonarr:
+    image: lscr.io/linuxserver/sonarr
+    container_name: sonarr
+    environment:
+      - PUID=1000
+      - PGID=100
+      - TZ=Amercia/Montreal
+    volumes:
+      - ${DOCKER_FOLDER}/sonarr/config:/config
+      - ${TORRENT_COMPLETED_FOLDER}:/torrentcompleted
+      - ${TV_SHOWS_FOLDER}:/tvshows
+    ports:
+      - 8989
+    restart: always
+    
+  radarr:
+    image: lscr.io/linuxserver/radarr
+    container_name: radarr
+    environment:
+      - PUID=1000
+      - PGID=100
+      - TZ=America/Montreal
+    volumes:
+      - ${DOCKER_FOLDER}/radarr/config:/config
+      - ${TORRENT_COMPLETED_FOLDER}:/torrentcompleted
+      - ${MOVIES_FOLDER}:/movies
+    ports:
+      - 7878
+    restart: always
+
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:develop
+    container_name: prowlarr
+    environment:
+      - PUID=1000
+      - PGID=100
+      - TZ=America/Montreal
+    volumes:
+      - ${DOCKER_FOLDER}/prowlarr/config:/config
+    ports:
+      - 9696
+    restart: unless-stopped
+    
+  swag:
+    image: lscr.io/linuxserver/swag
+    container_name: swag
+    cap_add:
+      - NET_ADMIN
+    environment:
+      - PUID=1000
+      - PGID=100
+      - TZ=America/Montreal
+      - URL=${SWAG_URL}
+      - SUBDOMAINS=wildcard
+      - VALIDATION=dns
+      - DNSPLUGIN=ovh
+      - ONLY_SUBDOMAINS=true
+    volumes:
+      - ${DOCKER_FOLDER}/swag/config:/config
+    ports:
+      - 443
+      - 80
+    restart: always
+    
+  flaresolverr:
+    # DockerHub mirror flaresolverr/flaresolverr:latest
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: flaresolverr
+    environment:
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - LOG_HTML=${LOG_HTML:-false}
+      - CAPTCHA_SOLVER=${CAPTCHA_SOLVER:-none}
+      - TZ=America/Montreal
+    ports:
+      - 8191
+    restart: always
+    
+  vaultwarden:
+    image: vaultwarden/server:latest
+    container_name: vaultwarden 
+    environment:
+      - SIGNUPS_ALLOWED=false
+      - DOMAIN=${VAULTWARDEN_DOMAIN}
+      - SMTP_HOST=postfix
+      - SMTP_FROM=${VAULTWARDEN_SMTP_FROM}
+      - SMTP_PORT=25
+      - SMTP_SSL=false
+      - SMTP_EXPLICIT_TLS=false
+    volumes:
+      - ${DOCKER_FOLDER}/vaultwarden/data:/data/
+    ports:
+      - 80
+    restart: always
+    
+  db:
+    image: mariadb:10.5
+    container_name: seafile-mysql
+    environment:
+      - MYSQL_ROOT_PASSWORD=${SEAFILE_MYSQL_ROOT_PASSWORD}
+      - MYSQL_LOG_CONSOLE=true
+    volumes:
+      - ${DOCKER_FOLDER}/seafile/db:/var/lib/mysql
+    restart: always
+      
+  memcached:
+    image: memcached:1.5.6
+    container_name: seafile-memcached
+    entrypoint: memcached -m 256
+    restart: always
+
+  seafile:
+    image: seafileltd/seafile-mc:9.0.6
+    container_name: seafile
+    ports:
+      - 8000
+      - 8082
+    volumes:
+      - ${DOCKER_FOLDER}/seafile/seafile-data:/shared
+    environment:
+      - DB_HOST=db
+      - DB_ROOT_PASSWD=${SEAFILE_MYSQL_ROOT_PASSWORD}
+      - SEAFILE_ADMIN_EMAIL=${SEAFILE_ADMIN_EMAIL}
+      - SEAFILE_SERVER_HOSTNAME=${SEAFILE_SERVER_HOSTNAME}
+    depends_on:
+      - db
+      - memcached
+    restart: always
+
+  postfix:
+    image: juanluisbaptiste/postfix:latest
+    container_name: postfix
+    environment:
+      - SMTP_SERVER=${POSTFIX_SMTP_SERVER}
+      - SMTP_PORT=${POSTFIX_SMTP_PORT}
+      - SMTP_USERNAME=${POSTFIX_SMTP_USERNAME}
+      - SMTP_PASSWORD=${POSTFIX_SMTP_PASSWORD}
+      - SERVER_HOSTNAME=${POSTFIX_SERVER_HOSTNAME}
+      - SMTP_NETWORKS=192.168.1.0/24,172.18.0.0/24
+      - ALWAYS_ADD_MISSING_HEADERS=yes
+      - LOG_SUBJECT=yes
+    restart: always
+    volumes:
+     - "/etc/localtime:/etc/localtime:ro"
+
+  bazarr:
+    image: lscr.io/linuxserver/bazarr:latest
+    container_name: bazarr
+    environment:
+      - PUID=1000
+      - PGID=100
+      - TZ=America/Montreal
+    volumes:
+      - ${DOCKER_FOLDER}/bazarr/config:/config
+      - ${MOVIES_FOLDER}:/movies
+      - ${TV_SHOWS_FOLDER}:/tvshows
+    ports:
+     - 6767:6767
+    restart: unless-stopped
+
+  adguardhome:
+    image: adguard/adguardhome
+    container_name: adguardhome
+    ports:
+      - 53:53/tcp
+      - 53:53/udp
+      - 784:784/udp
+      - 853:853/tcp
+      - 3000:3000/tcp
+      - 83:80/tcp
+    volumes:
+      - ${DOCKER_FOLDER}/adguardhome/work:/opt/adguardhome/work
+      - ${DOCKER_FOLDER}/adguardhome/conf:/opt/adguardhome/conf
+    networks:
+      myvlan:
+        ipv4_address: 192.168.1.253
+    restart: unless-stopped
+
+  wireguard:
+    image: lscr.io/linuxserver/wireguard:latest
+    container_name: wireguard
+    cap_add:
+      - NET_ADMIN
+    environment:
+      - TZ=America/Montreal
+      - SERVERURL= ${WIREGUARD_SERVERURL}
+      - SERVERPORT=51820 #optional
+      - PEERS=2 #optional
+      - PEERDNS=auto #optional
+    volumes:
+      - ${DOCKER_FOLDER}/wireguard/config:/config
+    ports:
+      - 51820:51820/udp
+    sysctls:
+      - net.ipv4.conf.all.src_valid_mark=1
+    restart: unless-stopped
