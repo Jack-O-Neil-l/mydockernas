@@ -263,3 +263,14 @@ services:
     sysctls:
       - net.ipv4.conf.all.src_valid_mark=1
     restart: unless-stopped
+  
+  audiobookshelf:
+    image: ghcr.io/advplyr/audiobookshelf:latest
+    container_name: audiobookshelf
+    ports:
+      - 13378:80
+    volumes:
+      - ${AUDIOBOOKS_FOLDER}/audiobooks:/audiobooks
+      - ${DOCKER_FOLDER}/audiobookshelf/config:/config
+      - ${DOCKER_FOLDER}/audiobookshelf/metadata:/metadata
+    restart: always
